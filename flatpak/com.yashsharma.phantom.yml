@@ -1,4 +1,4 @@
-app-id: com.mitchellh.ghostty
+app-id: com.yashsharma.phantom
 runtime: org.gnome.Platform
 runtime-version: "50"
 sdk: org.gnome.Sdk

@@ -2016,7 +2016,7 @@ pub const Window = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const name = "Ghostty";
-        const icon = "com.mitchellh.ghostty";
+        const icon = "com.yashsharma.phantom";
         const website = "https://ghostty.org";
 
         adw.showAboutDialog(
