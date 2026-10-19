@@ -1,6 +1,6 @@
 # Phantom
 
-Phantom is the macOS terminal for our team. It is [Ghostty](https://ghostty.org/) with our app name and a sidebar that lists every tab in the current window, so you can jump between a shell and the AI agents you run in other tabs.
+Phantom is a macOS terminal for running several AI agent sessions at once. It is [Ghostty](https://ghostty.org/), with a sidebar that lists every tab in the current window so you can switch between them.
 
 Install Phantom from this repository. The app on [ghostty.org](https://ghostty.org/download) is upstream Ghostty, and it will not include our sidebar.
 

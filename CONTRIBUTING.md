@@ -1,6 +1,6 @@
 # Contributing to Phantom
 
-Install Phantom from [the README](README.md). Issues and pull requests in this repository are for Phantom: the app name, the session sidebar, and the build we ship to the team.
+Install Phantom from [the README](README.md). Issues and pull requests in this repository are for Phantom: the app name and the session sidebar.
 
 The rest of this file is Ghostty's upstream contributing guide. It describes how the terminal code is maintained.
 
