@@ -812,6 +812,11 @@ pub const Action = union(enum) {
     /// version can be found by running `ghostty +version`.
     toggle_command_palette,
 
+    /// Toggle the session sidebar.
+    ///
+    /// Only implemented on macOS.
+    toggle_session_sidebar,
+
     /// Toggle the quick terminal.
     ///
     /// The quick terminal, also known as the "Quake-style" or drop-down
@@ -1428,6 +1433,7 @@ pub const Action = union(enum) {
             .toggle_secure_input,
             .toggle_mouse_reporting,
             .toggle_command_palette,
+            .toggle_session_sidebar,
             .toggle_background_opacity,
             .show_on_screen_keyboard,
             .reset_window_size,

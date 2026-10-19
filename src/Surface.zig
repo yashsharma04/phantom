@@ -5593,6 +5593,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .toggle_session_sidebar => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .toggle_session_sidebar,
+            {},
+        ),
+
         .toggle_background_opacity => return try self.rt_app.performAction(
             .{ .surface = self },
             .toggle_background_opacity,

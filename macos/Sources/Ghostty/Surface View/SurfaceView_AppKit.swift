@@ -1036,6 +1036,7 @@ extension Ghostty {
             if let window,
                let controller = window.windowController as? BaseTerminalController,
                !controller.commandPaletteIsShowing,
+               !controller.sessionSidebarSearchFocused,
                window.isKeyWindow &&
                     !self.focused &&
                     controller.focusFollowsMouse {

@@ -42,7 +42,12 @@ class BaseTerminalController: NSWindowController,
 
     /// The currently focused surface.
     var focusedSurface: Ghostty.SurfaceView? {
-        didSet { syncFocusToSurfaceTree() }
+        didSet {
+            syncFocusToSurfaceTree()
+            if oldValue !== focusedSurface {
+                scheduleSessionSidebarRefresh()
+            }
+        }
     }
 
     /// The tree of splits within this terminal window.
@@ -55,6 +60,36 @@ class BaseTerminalController: NSWindowController,
 
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
+
+    /// The session sidebar beside this window. The initial value is the last
+    /// persisted visibility; the sidebar starts hidden when that value is absent.
+    @Published var sessionSidebarIsShowing: Bool = UserDefaults.standard.bool(
+        forKey: BaseTerminalController.sessionSidebarVisibleDefaultsKey
+    ) {
+        didSet { sessionSidebarVisibilityDidChange() }
+    }
+
+    /// One row per tab in this window's tab group.
+    @Published private(set) var sessionSidebarRows: [SessionTabRow] = []
+
+    /// Set when the sidebar opens so its search field becomes first responder.
+    @Published var sessionSidebarFocusSearch: Bool = false
+
+    /// True while the sidebar search field is first responder. Not published:
+    /// writing it must not rebuild the split view.
+    var sessionSidebarSearchFocused: Bool = false
+
+    /// Last sidebar split width. Not published for the same reason.
+    var sessionSidebarWidth: Double = BaseTerminalController.storedSessionSidebarWidth()
+
+    private var sessionSidebarRefreshTimer: Timer?
+    private var sessionSidebarTabGroupObservation: NSKeyValueObservation?
+    private weak var observedSessionSidebarTabGroup: NSWindowTabGroup?
+    /// The toggle that opened the sidebar is the one that focuses search.
+    private var sessionSidebarShouldFocusSearch = false
+    /// Prevents tab-group siblings from echoing a visibility change back.
+    private var isPropagatingSessionSidebar = false
+    private var isRefreshingSessionSidebar = false
 
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
@@ -103,7 +138,12 @@ class BaseTerminalController: NSWindowController,
     /// An override title for the tab/window set by the user via prompt_tab_title.
     /// When set, this takes precedence over the computed title from the terminal.
     var titleOverride: String? {
-        didSet { applyTitleToWindow() }
+        didSet {
+            applyTitleToWindow()
+            if oldValue != titleOverride {
+                scheduleSessionSidebarRefresh()
+            }
+        }
     }
 
     /// The last computed title from the focused surface (without the override).
@@ -176,6 +216,11 @@ class BaseTerminalController: NSWindowController,
             object: nil)
         center.addObserver(
             self,
+            selector: #selector(ghosttySessionSidebarDidToggle(_:)),
+            name: .ghosttySessionSidebarDidToggle,
+            object: nil)
+        center.addObserver(
+            self,
             selector: #selector(ghosttyMaximizeDidToggle(_:)),
             name: .ghosttyMaximizeDidToggle,
             object: nil)
@@ -230,6 +275,8 @@ class BaseTerminalController: NSWindowController,
     }
 
     deinit {
+        sessionSidebarRefreshTimer?.invalidate()
+        sessionSidebarTabGroupObservation?.invalidate()
         NotificationCenter.default.removeObserver(self)
         undoManager?.removeAllActions(withTarget: self)
         if let eventMonitor {
@@ -648,6 +695,12 @@ class BaseTerminalController: NSWindowController,
         toggleCommandPalette(nil)
     }
 
+    @objc private func ghosttySessionSidebarDidToggle(_ notification: Notification) {
+        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+        guard surfaceTree.contains(surfaceView) else { return }
+        toggleSessionSidebar(nil)
+    }
+
     @objc private func ghosttyMaximizeDidToggle(_ notification: Notification) {
         guard let window else { return }
         guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
@@ -911,6 +964,7 @@ class BaseTerminalController: NSWindowController,
     private func titleDidChange(to: String) {
         lastComputedTitle = to
         applyTitleToWindow()
+        scheduleSessionSidebarRefresh()
     }
 
     private func applyTitleToWindow() {
@@ -1170,6 +1224,20 @@ class BaseTerminalController: NSWindowController,
 
         // Set our update overlay state
         updateOverlayIsVisible = defaultUpdateOverlayVisibility()
+
+        // The visibility flag is applied at init, which does not run didSet.
+        // Tab-group access is deferred so it does not materialize AppKit's tab
+        // group while this window is still being created.
+        if sessionSidebarIsShowing {
+            sessionSidebarFocusSearch = true
+            // One row for this window, without touching the tab group yet, so the
+            // first frame is not the empty-filter message.
+            seedSessionSidebarRow()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.sessionSidebarIsShowing else { return }
+                self.beginSessionSidebarUpdates()
+            }
+        }
     }
 
     func defaultUpdateOverlayVisibility() -> Bool {
@@ -1229,6 +1297,7 @@ class BaseTerminalController: NSWindowController,
     }
 
     func windowWillClose(_ notification: Notification) {
+        endSessionSidebarUpdates()
         guard let window else { return }
 
         for surfaceView in surfaceTree {
@@ -1259,7 +1328,10 @@ class BaseTerminalController: NSWindowController,
         // If when we become key our first responder is the window itself, then we
         // want to move focus to our focused terminal surface. This works around
         // various weirdness with moving surfaces around.
-        if let window, window.firstResponder == window, let focusedSurface {
+        if let window,
+           window.firstResponder == window,
+           let focusedSurface,
+           !sessionSidebarFocusSearch {
             DispatchQueue.main.async {
                 Ghostty.moveFocus(to: focusedSurface)
             }
@@ -1269,6 +1341,7 @@ class BaseTerminalController: NSWindowController,
         // Sync on the next runloop so split focus has settled first.
         DispatchQueue.main.async {
             self.syncFocusToSurfaceTree()
+            self.refreshVisibleSessionSidebars()
         }
     }
 
@@ -1276,6 +1349,7 @@ class BaseTerminalController: NSWindowController,
         // Becoming/losing key means we have to notify our surface(s) that we have focus
         // so things like cursors blink, pty events are sent, etc.
         self.syncFocusToSurfaceTree()
+        scheduleSessionSidebarRefresh()
     }
 
     func windowDidChangeOcclusionState(_ notification: Notification) {
@@ -1424,6 +1498,11 @@ class BaseTerminalController: NSWindowController,
     @IBAction func resetFontSize(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
         ghostty.changeFontSize(surface: surface, .reset)
+    }
+
+    @IBAction func toggleSessionSidebar(_ sender: Any?) {
+        sessionSidebarShouldFocusSearch = !sessionSidebarIsShowing
+        sessionSidebarIsShowing.toggle()
     }
 
     @IBAction func toggleCommandPalette(_ sender: Any?) {
@@ -1729,6 +1808,231 @@ extension BaseTerminalController {
             // subscriptions for old/removed surfaces when the tree changes.
             .switchToLatest()
             .eraseToAnyPublisher()
+    }
+}
+
+// MARK: Session Sidebar
+
+extension BaseTerminalController {
+    static let sessionSidebarVisibleDefaultsKey = "sessionSidebarVisible"
+    static let sessionSidebarWidthDefaultsKey = "sessionSidebarWidth"
+    static let defaultSessionSidebarWidth: Double = 220
+
+    static func storedSessionSidebarWidth() -> Double {
+        let value = UserDefaults.standard.double(forKey: sessionSidebarWidthDefaultsKey)
+        if value >= 80 && value <= 640 {
+            return value
+        }
+        return defaultSessionSidebarWidth
+    }
+
+    private func sessionSidebarVisibilityDidChange() {
+        UserDefaults.standard.set(
+            sessionSidebarIsShowing,
+            forKey: Self.sessionSidebarVisibleDefaultsKey)
+        if sessionSidebarIsShowing {
+            let focus = sessionSidebarShouldFocusSearch
+            sessionSidebarShouldFocusSearch = false
+            if focus {
+                // Same reason as the command palette: the surface would otherwise
+                // keep consuming key equivalents meant for the search field.
+                _ = focusedSurface?.resignFirstResponder()
+                sessionSidebarFocusSearch = true
+            }
+            beginSessionSidebarUpdates()
+        } else {
+            sessionSidebarShouldFocusSearch = false
+            sessionSidebarFocusSearch = false
+            sessionSidebarSearchFocused = false
+            endSessionSidebarUpdates()
+            if window?.isKeyWindow == true {
+                moveFocusToSessionSidebarTerminal()
+            }
+        }
+        guard !isPropagatingSessionSidebar else { return }
+        // Other tabs are separate windows. Selecting one presents that window,
+        // so the sidebar has to already be open there to stay on screen.
+        propagateSessionSidebarVisibility()
+    }
+
+    private func propagateSessionSidebarVisibility() {
+        for window in sessionSidebarWindows() {
+            guard let controller = window.windowController as? BaseTerminalController,
+                  controller !== self,
+                  controller.sessionSidebarIsShowing != sessionSidebarIsShowing else { continue }
+            controller.isPropagatingSessionSidebar = true
+            controller.sessionSidebarIsShowing = sessionSidebarIsShowing
+            controller.isPropagatingSessionSidebar = false
+        }
+    }
+
+    private func beginSessionSidebarUpdates() {
+        syncSessionSidebarTabGroupObservation()
+        refreshSessionSidebarRows()
+        startSessionSidebarTimer()
+        // focusedSurface is assigned after this controller's windowDidLoad.
+        // Refresh once that assignment has happened.
+        scheduleSessionSidebarRefresh()
+    }
+
+    private func endSessionSidebarUpdates() {
+        sessionSidebarRefreshTimer?.invalidate()
+        sessionSidebarRefreshTimer = nil
+        sessionSidebarTabGroupObservation?.invalidate()
+        sessionSidebarTabGroupObservation = nil
+        observedSessionSidebarTabGroup = nil
+    }
+
+    private func startSessionSidebarTimer() {
+        guard sessionSidebarRefreshTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshVisibleSessionSidebars()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sessionSidebarRefreshTimer = timer
+    }
+
+    private func scheduleSessionSidebarRefresh() {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshVisibleSessionSidebars()
+        }
+    }
+
+    /// Rebuilds every visible sidebar in this tab group. Title and focus changes
+    /// on one tab have to show up in the others.
+    private func refreshVisibleSessionSidebars() {
+        let windows = sessionSidebarWindows()
+        if windows.isEmpty {
+            refreshSessionSidebarRows()
+            return
+        }
+        for window in windows {
+            (window.windowController as? BaseTerminalController)?.refreshSessionSidebarRows()
+        }
+    }
+
+    private func refreshSessionSidebarRows() {
+        guard sessionSidebarIsShowing, !isRefreshingSessionSidebar else { return }
+        isRefreshingSessionSidebar = true
+        defer { isRefreshingSessionSidebar = false }
+        syncSessionSidebarTabGroupObservation()
+        let rows = makeSessionSidebarRows()
+        if rows != sessionSidebarRows {
+            sessionSidebarRows = rows
+        }
+    }
+
+    private func syncSessionSidebarTabGroupObservation() {
+        guard sessionSidebarIsShowing, let window else { return }
+        let group = window.tabGroup
+        if observedSessionSidebarTabGroup === group, sessionSidebarTabGroupObservation != nil {
+            return
+        }
+        sessionSidebarTabGroupObservation?.invalidate()
+        observedSessionSidebarTabGroup = group
+        guard let group else {
+            sessionSidebarTabGroupObservation = nil
+            return
+        }
+        sessionSidebarTabGroupObservation = group.observe(\.windows, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshVisibleSessionSidebars()
+            }
+        }
+    }
+
+    private func sessionSidebarWindows() -> [NSWindow] {
+        guard let window else { return [] }
+        if let group = window.tabGroup, !group.windows.isEmpty {
+            return group.windows
+        }
+        return [window]
+    }
+
+    /// Stable for the life of the window. `windowNumber` is -1 until the window
+    /// is on screen, so the object identity is the id that does not change.
+    private func sessionSidebarRowID(for window: NSWindow) -> String {
+        "\(ObjectIdentifier(window))"
+    }
+
+    /// Row for this window only. Used before the tab group can be read safely.
+    private func seedSessionSidebarRow() {
+        guard let window else { return }
+        sessionSidebarRows = [SessionTabRow(
+            id: sessionSidebarRowID(for: window),
+            title: sessionSidebarTitle(for: self),
+            command: sessionSidebarCommand(for: self),
+            isFocused: NSApp.keyWindow?.windowController === self,
+            tabColor: sessionSidebarTabColor(for: window))]
+    }
+
+    private func makeSessionSidebarRows() -> [SessionTabRow] {
+        let keyController = NSApp.keyWindow?.windowController as? BaseTerminalController
+        return sessionSidebarWindows().compactMap { window in
+            guard let controller = window.windowController as? BaseTerminalController else { return nil }
+            return SessionTabRow(
+                id: self.sessionSidebarRowID(for: window),
+                title: self.sessionSidebarTitle(for: controller),
+                command: self.sessionSidebarCommand(for: controller),
+                isFocused: controller === keyController,
+                tabColor: self.sessionSidebarTabColor(for: window))
+        }
+    }
+
+    func refreshSessionSidebarForTabColor() {
+        refreshVisibleSessionSidebars()
+    }
+
+    private func sessionSidebarTabColor(for window: NSWindow) -> TerminalTabColor {
+        (window as? TerminalWindow)?.tabColor ?? .none
+    }
+
+    private func sessionSidebarTitle(for controller: BaseTerminalController) -> String {
+        if let override = controller.titleOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+        return controller.focusedSurface?.title ?? ""
+    }
+
+    private func sessionSidebarCommand(for controller: BaseTerminalController) -> String? {
+        let surface = controller.focusedSurface ?? controller.surfaceTree.root?.leftmostLeaf()
+        guard let pid = surface?.surfaceModel?.foregroundPID else { return nil }
+        guard let pid32 = Int32(exactly: pid) else { return nil }
+        return ProcessName.basename(pid: pid32)
+    }
+
+    private func sessionSidebarSurface(for controller: BaseTerminalController) -> Ghostty.SurfaceView? {
+        controller.focusedSurface ?? controller.surfaceTree.root?.leftmostLeaf()
+    }
+
+    func selectSessionSidebarRow(_ row: SessionTabRow) {
+        guard let window = sessionSidebarWindows().first(where: {
+            sessionSidebarRowID(for: $0) == row.id
+        }), let controller = window.windowController as? BaseTerminalController,
+              let surface = sessionSidebarSurface(for: controller) else { return }
+        NotificationCenter.default.post(
+            name: Ghostty.Notification.ghosttyPresentTerminal,
+            object: surface)
+    }
+
+    func dismissSessionSidebarSearch() {
+        sessionSidebarFocusSearch = false
+        sessionSidebarSearchFocused = false
+        moveFocusToSessionSidebarTerminal()
+    }
+
+    func noteSessionSidebarWidth(_ width: Double) {
+        guard width >= 80, width <= 640 else { return }
+        guard abs(width - sessionSidebarWidth) > 0.5 else { return }
+        sessionSidebarWidth = width
+        UserDefaults.standard.set(width, forKey: Self.sessionSidebarWidthDefaultsKey)
+    }
+
+    private func moveFocusToSessionSidebarTerminal() {
+        guard let surface = focusedSurface ?? surfaceTree.root?.leftmostLeaf() else { return }
+        Ghostty.moveFocus(to: surface)
     }
 }
 

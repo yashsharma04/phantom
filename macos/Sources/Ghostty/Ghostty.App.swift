@@ -701,6 +701,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_TOGGLE_COMMAND_PALETTE:
                 toggleCommandPalette(app, target: target)
 
+            case GHOSTTY_ACTION_TOGGLE_SESSION_SIDEBAR:
+                toggleSessionSidebar(app, target: target)
+
             case GHOSTTY_ACTION_TOGGLE_MAXIMIZE:
                 toggleMaximize(app, target: target)
 
@@ -1153,6 +1156,27 @@ extension Ghostty {
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
                 NotificationCenter.default.post(
                     name: .ghosttyCommandPaletteDidToggle,
+                    object: surfaceView
+                )
+
+            default:
+                assertionFailure()
+            }
+        }
+
+        private static func toggleSessionSidebar(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("toggle session sidebar does nothing with an app target")
+                return
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                NotificationCenter.default.post(
+                    name: .ghosttySessionSidebarDidToggle,
                     object: surfaceView
                 )
 

@@ -7130,6 +7130,13 @@ pub const Keybinds = struct {
             .toggle_command_palette,
         );
 
+        // Toggle session sidebar. Cmd+Shift+S on macOS, Ctrl+Shift+S elsewhere.
+        try self.set.put(
+            alloc,
+            .{ .key = .{ .unicode = 's' }, .mods = inputpkg.ctrlOrSuper(.{ .shift = true }) },
+            .toggle_session_sidebar,
+        );
+
         // Mac-specific keyboard bindings.
         if (comptime builtin.target.os.tag.isDarwin()) {
             try self.set.put(

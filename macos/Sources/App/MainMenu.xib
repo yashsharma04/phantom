@@ -61,6 +61,7 @@
                 <outlet property="menuSelectSplitRight" destination="upj-mc-L7X" id="nLY-o1-lky"/>
                 <outlet property="menuSelectionForFind" destination="TDN-42-Bu7" id="zya-wG-CDo"/>
                 <outlet property="menuServices" destination="aQe-vS-j8Q" id="uWQ-Wo-T1L"/>
+                <outlet property="menuSessionSidebar" destination="SbV-01-Itm" id="SbV-01-Out"/>
                 <outlet property="menuSetAsDefaultTerminal" destination="b1t-oB-7MI" id="6Eu-5G-OPo"/>
                 <outlet property="menuSplitDown" destination="UDZ-4y-6xL" id="ptr-mj-Azh"/>
                 <outlet property="menuSplitLeft" destination="Ppv-GP-lQU" id="Xd5-Cd-Jut"/>
@@ -338,6 +339,12 @@
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="toggleCommandPalette:" target="-1" id="FcT-XD-gM1"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Session Sidebar" id="SbV-01-Itm">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="toggleSessionSidebar:" target="-1" id="SbV-01-Act"/>
                                 </connections>
                             </menuItem>
                             <menuItem title="Change Tab Title..." id="iac-lh-Cl7">

@@ -35,6 +35,30 @@ protocol TerminalViewModel: ObservableObject {
 
     /// The update overlay should be visible.
     var updateOverlayIsVisible: Bool { get }
+
+    /// The session sidebar is visible to the left of the terminal.
+    var sessionSidebarIsShowing: Bool { get set }
+
+    /// Tabs in this window's tab group, in tab order.
+    var sessionSidebarRows: [SessionTabRow] { get }
+
+    /// Restored width of the session sidebar split.
+    var sessionSidebarWidth: Double { get }
+
+    /// Set to true to move keyboard focus into the sidebar search field.
+    var sessionSidebarFocusSearch: Bool { get set }
+
+    /// True while the sidebar search field is first responder.
+    var sessionSidebarSearchFocused: Bool { get set }
+
+    /// Focus the tab for a sidebar row. The sidebar stays open.
+    func selectSessionSidebarRow(_ row: SessionTabRow)
+
+    /// Return keyboard focus to the terminal. The sidebar stays open.
+    func dismissSessionSidebarSearch()
+
+    /// Remember a sidebar width reported by the split view.
+    func noteSessionSidebarWidth(_ width: Double)
 }
 
 /// The main terminal view. This terminal view supports splits.
@@ -79,30 +103,15 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         DebugBuildWarningView()
                     }
 
-                    TerminalSplitTreeView(
-                        tree: viewModel.surfaceTree,
-                        action: { delegate?.performSplitAction($0) })
-                        .environmentObject(ghostty)
-                        .ghosttyLastFocusedSurface(lastFocusedSurface)
-                        .focused($focused)
-                        .onAppear { self.focused = true }
-                        .onChange(of: focusedSurface) { newValue in
-                            // We want to keep track of our last focused surface so even if
-                            // we lose focus we keep this set to the last non-nil value.
-                            if newValue != nil {
-                                lastFocusedSurface = .init(newValue)
-                                self.delegate?.focusedSurfaceDidChange(to: newValue)
-                            }
+                    if viewModel.sessionSidebarIsShowing {
+                        HSplitView {
+                            sessionSidebar
+                            terminalSplitTree
+                                .frame(minWidth: 200)
                         }
-                        .onChange(of: pwdURL) { newValue in
-                            self.delegate?.pwdDidChange(to: newValue)
-                        }
-                        .onChange(of: cellSize) { newValue in
-                            guard let size = newValue else { return }
-                            self.delegate?.cellSizeDidChange(to: size)
-                        }
-                        .frame(idealWidth: lastFocusedSurface?.value?.initialSize?.width,
-                               idealHeight: lastFocusedSurface?.value?.initialSize?.height)
+                    } else {
+                        terminalSplitTree
+                    }
                 }
                 // Ignore safe area to extend up in to the titlebar region if we have the "hidden" titlebar style
                 .ignoresSafeArea(.container, edges: ghostty.config.macosTitlebarStyle == .hidden ? .top : [])
@@ -124,6 +133,54 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
             }
             .frame(maxWidth: .greatestFiniteMagnitude, maxHeight: .greatestFiniteMagnitude)
         }
+    }
+
+    private var sessionSidebar: some View {
+        SessionSidebarView(
+            rows: viewModel.sessionSidebarRows,
+            focusSearch: $viewModel.sessionSidebarFocusSearch,
+            searchIsFocused: $viewModel.sessionSidebarSearchFocused,
+            onSelect: { viewModel.selectSessionSidebarRow($0) },
+            onDismiss: { viewModel.dismissSessionSidebarSearch() },
+            onWidthChange: { viewModel.noteSessionSidebarWidth($0) }
+        )
+        .frame(
+            minWidth: 160,
+            idealWidth: CGFloat(viewModel.sessionSidebarWidth),
+            maxWidth: 480
+        )
+    }
+
+    private var terminalSplitTree: some View {
+        TerminalSplitTreeView(
+            tree: viewModel.surfaceTree,
+            action: { delegate?.performSplitAction($0) })
+            .environmentObject(ghostty)
+            .ghosttyLastFocusedSurface(lastFocusedSurface)
+            .focused($focused)
+            .onAppear {
+                // The sidebar search field takes focus when it is opening.
+                if !viewModel.sessionSidebarIsShowing {
+                    self.focused = true
+                }
+            }
+            .onChange(of: focusedSurface) { newValue in
+                // We want to keep track of our last focused surface so even if
+                // we lose focus we keep this set to the last non-nil value.
+                if newValue != nil {
+                    lastFocusedSurface = .init(newValue)
+                    self.delegate?.focusedSurfaceDidChange(to: newValue)
+                }
+            }
+            .onChange(of: pwdURL) { newValue in
+                self.delegate?.pwdDidChange(to: newValue)
+            }
+            .onChange(of: cellSize) { newValue in
+                guard let size = newValue else { return }
+                self.delegate?.cellSizeDidChange(to: size)
+            }
+            .frame(idealWidth: lastFocusedSurface?.value?.initialSize?.width,
+                   idealHeight: lastFocusedSurface?.value?.initialSize?.height)
     }
 }
 

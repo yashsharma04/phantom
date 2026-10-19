@@ -58,6 +58,9 @@ pub fn init(
         const env_map = try b.allocator.create(std.process.Environ.Map);
         env_map.* = .init(b.allocator);
         if (env.get("PATH")) |v| try env_map.put("PATH", v);
+        // xcode-select may point at the Command Line Tools. Honor DEVELOPER_DIR
+        // so `zig build` uses the Xcode the caller exported.
+        if (env.get("DEVELOPER_DIR")) |v| try env_map.put("DEVELOPER_DIR", v);
 
         const step = RunStep.create(b, "xcodebuild");
         step.has_side_effects = true;
@@ -94,6 +97,7 @@ pub fn init(
         const env_map = try b.allocator.create(std.process.Environ.Map);
         env_map.* = .init(b.allocator);
         if (env.get("PATH")) |v| try env_map.put("PATH", v);
+        if (env.get("DEVELOPER_DIR")) |v| try env_map.put("DEVELOPER_DIR", v);
 
         const step = RunStep.create(b, "xcodebuild test");
         step.has_side_effects = true;

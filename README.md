@@ -1,3 +1,48 @@
+# Phantom
+
+Phantom is our macOS build of [Ghostty](https://ghostty.org/). It is the full Ghostty terminal, under our own app name, with a session sidebar for switching tabs.
+
+The repo is private. Anyone who should install it needs access to [yashsharma04/phantom](https://github.com/yashsharma04/phantom).
+
+## Install on macOS
+
+You need:
+
+- macOS 26
+- Xcode 26, the full app from the App Store, plus the Metal toolchain
+- Zig 0.16.0
+
+```bash
+brew install zig@0.16
+sudo xcode-select --switch /Applications/Xcode.app
+xcodebuild -downloadComponent MetalToolchain
+
+git clone https://github.com/yashsharma04/phantom.git
+cd phantom
+
+export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
+zig build -Doptimize=ReleaseFast
+open macos/build/ReleaseLocal/Phantom.app
+```
+
+`ReleaseFast` is the build to use day to day. A plain `zig build` is a debug build, and the window warns that it is slow.
+
+Homebrew does not put Zig 0.16 on your `PATH`. The `export` line above is required in each new terminal until you add it to your shell config.
+
+## Session sidebar
+
+**Cmd+Shift+S**, or **View → Session Sidebar**, opens a list of the tabs in the current window. Type to filter by the tab title or the program running in that tab (`claude`, `zsh`, and so on). Click a row, or press Return, to focus that tab. A tab color shows as a vertical strip on its row.
+
+## What stays Ghostty's
+
+The command is still `ghostty`. The config file is still `~/.config/ghostty`. Programs still see `TERM=xterm-ghostty`. Check for Updates is off, so a Ghostty release cannot replace this app.
+
+Ghostty is MIT licensed. Copyright (c) 2024 Mitchell Hashimoto and Ghostty contributors. That notice stays in `LICENSE`.
+
+The rest of this file is upstream Ghostty's README.
+
+---
+
 <!-- LOGO -->
 <h1>
 <p align="center">
